@@ -16,7 +16,7 @@ import re
 import sys
 import subprocess
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 try:
     import pymupdf as fitz
@@ -72,6 +72,8 @@ class Tarjador(tk.Tk):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
+        # fonte padrao do sistema: "Segoe UI" so existe no Windows
+        self.fonte_ui = tkfont.nametofont("TkDefaultFont").actual("family")
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
@@ -85,7 +87,7 @@ class Tarjador(tk.Tk):
                   background=[("active", "#4a4a54"), ("pressed", "#2f2f37")],
                   foreground=[("disabled", "#77777f")])
         style.configure("Save.TButton", padding=(14, 7), background=ACCENT,
-                        foreground="#ffffff", borderwidth=0, font=("Segoe UI", 9, "bold"))
+                        foreground="#ffffff", borderwidth=0, font=(self.fonte_ui, 9, "bold"))
         style.map("Save.TButton", background=[("active", "#5cb0ff"), ("pressed", "#3a86e0")])
         style.configure("TLabel", background=BG, foreground=FG)
         style.configure("Panel.TLabel", background=PANEL, foreground=FG)
@@ -116,25 +118,13 @@ class Tarjador(tk.Tk):
 
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=12, pady=8)
 
-        ttk.Button(bar, text="Desfazer (Ctrl+Z)", command=self.undo).pack(side="left", padx=2)
+        ttk.Button(bar, text="Desfazer", command=self.undo).pack(side="left", padx=2)
         ttk.Button(bar, text="Limpar pagina", command=self.clear_page).pack(side="left", padx=2)
         ttk.Button(bar, text="Detectar CPFs", command=self.detect_cpfs).pack(side="left", padx=2)
 
         self.save_btn = ttk.Button(bar, text="SALVAR EM OUTPUT", style="Save.TButton",
                                    command=self.save)
         self.save_btn.pack(side="right", padx=10, pady=8)
-
-        raster_chk = ttk.Checkbutton(bar, text="Rasterizar paginas tarjadas",
-                                     variable=self.rasterizar, style="Panel.TCheckbutton")
-        raster_chk.pack(side="right", padx=6)
-        self._tooltip(raster_chk,
-                      "Transforma cada pagina tarjada em imagem ao salvar.\n"
-                      "Nao sobra nenhum objeto de texto na pagina - nem invisivel.\n"
-                      "Em troca: o arquivo fica maior e nao da para selecionar\n"
-                      "texto nessas paginas.\n\n"
-                      "Nao e necessario para foto: a area tarjada ja e pintada\n"
-                      "de preto DENTRO do arquivo de imagem, apagando os pixels\n"
-                      "originais. Isto aqui e so uma camada extra de garantia.")
 
         # ---- corpo
         body = ttk.Frame(self)
@@ -145,14 +135,31 @@ class Tarjador(tk.Tk):
         side.pack_propagate(False)
 
         ttk.Label(side, text="  PDFs em  input/", style="Panel.TLabel",
-                  font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 6))
+                  font=(self.fonte_ui, 10, "bold")).pack(anchor="w", pady=(10, 6))
+
+        # de baixo para cima: a lista fica com o espaco que sobrar.
+        # A opcao mora aqui, e nao na barra de cima, porque la ela disputava
+        # espaco com os botoes e o texto era cortado em fontes mais largas.
+        ttk.Button(side, text="Atualizar lista", command=self.refresh_file_list).pack(
+            side="bottom", fill="x", padx=8, pady=8)
+        raster_chk = ttk.Checkbutton(side, text="Rasterizar paginas tarjadas",
+                                     variable=self.rasterizar, style="Panel.TCheckbutton")
+        raster_chk.pack(side="bottom", anchor="w", padx=8, pady=(6, 2))
+        ttk.Separator(side, orient="horizontal").pack(side="bottom", fill="x", padx=8, pady=(8, 0))
+        self._tooltip(raster_chk,
+                      "Transforma cada pagina tarjada em imagem ao salvar.\n"
+                      "Nao sobra nenhum objeto de texto na pagina - nem invisivel.\n"
+                      "Em troca: o arquivo fica maior e nao da para selecionar\n"
+                      "texto nessas paginas.\n\n"
+                      "Nao e necessario para foto: a area tarjada ja e pintada\n"
+                      "de preto DENTRO do arquivo de imagem, apagando os pixels\n"
+                      "originais. Isto aqui e so uma camada extra de garantia.")
+
         self.listbox = tk.Listbox(side, bg=BG, fg=FG, selectbackground=ACCENT,
                                   highlightthickness=0, borderwidth=0, activestyle="none")
         self.listbox.pack(fill="both", expand=True, padx=8)
         self.listbox.bind("<Double-Button-1>", self.open_from_list)
         self.listbox.bind("<Return>", self.open_from_list)
-        ttk.Button(side, text="Atualizar lista", command=self.refresh_file_list).pack(
-            fill="x", padx=8, pady=8)
 
         canvas_wrap = ttk.Frame(body)
         canvas_wrap.pack(side="left", fill="both", expand=True)
@@ -169,9 +176,16 @@ class Tarjador(tk.Tk):
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
         self.canvas.bind("<Button-3>", self.on_right_click)
+        # Windows/macOS mandam <MouseWheel>; o X11 (Linux) manda Button-4/5
         self.canvas.bind("<MouseWheel>", self.on_wheel)
         self.canvas.bind("<Shift-MouseWheel>", self.on_shift_wheel)
         self.canvas.bind("<Control-MouseWheel>", self.on_ctrl_wheel)
+        for botao, passo in (("<Button-4>", 1), ("<Button-5>", -1)):
+            self.canvas.bind(botao, lambda e, p=passo: self.on_wheel(self._roda(e, p)))
+            self.canvas.bind("<Shift-%s>" % botao[1:-1],
+                             lambda e, p=passo: self.on_shift_wheel(self._roda(e, p)))
+            self.canvas.bind("<Control-%s>" % botao[1:-1],
+                             lambda e, p=passo: self.on_ctrl_wheel(self._roda(e, p)))
         self.canvas.bind("<Configure>", self.on_canvas_resize)
 
         self.status = ttk.Label(self, text="", anchor="w", background=PANEL, foreground="#b9b9c0")
@@ -277,6 +291,11 @@ class Tarjador(tk.Tk):
         if new != self.zoom_index:
             self.zoom_index = new
             self.render()
+
+    def _roda(self, event, passo):
+        """Traduz o evento de roda do X11 para o formato do <MouseWheel>."""
+        event.delta = 120 * passo
+        return event
 
     def on_wheel(self, event):
         self.canvas.yview_scroll(-1 * (event.delta // 120), "units")

@@ -6,7 +6,9 @@ Tudo roda na sua máquina — nenhum arquivo sai daqui.
 ## Usar
 
 1. Jogue os PDFs na pasta `input/`
-2. Dê dois cliques em **`Tarjador.bat`**
+2. Abra o programa:
+   - **Windows:** dois cliques em `Tarjador.bat`
+   - **Linux / macOS:** `./tarjador.sh` (na primeira vez, `chmod +x tarjador.sh`)
 3. Duplo clique no arquivo na lista da esquerda
 4. Arraste o mouse sobre cada CPF (a tarja preta aparece na hora)
 5. **SALVAR EM OUTPUT** → sai em `output/nome_tarjado.pdf`
@@ -94,6 +96,11 @@ de verdade, não que você cobriu tudo. Passe o olho em todas as páginas antes 
 enviar — principalmente em documento escaneado, onde o "Detectar CPFs" não
 enxerga nada.
 
+**Uma foto repetida em várias páginas é o mesmo objeto dentro do PDF.** Se você
+tarjar ela numa página, ela sai tarjada em todas. Isso é o lado seguro do erro
+(o CPF é o mesmo, afinal), mas vale conferir se não atrapalha em algum
+documento.
+
 ## Controles
 
 | Ação | Como |
@@ -127,9 +134,89 @@ Dois cuidados:
 
 ## Requisitos
 
-Python 3 com `PyMuPDF` e `Pillow`. O `.bat` instala sozinho na primeira vez.
-Manualmente:
+Python 3.8+ com `tkinter`, `PyMuPDF` e `Pillow`. O mesmo `tarjador.py` roda nos
+três sistemas — os lançadores só cuidam da instalação.
+
+**Windows** — `Tarjador.bat` instala sozinho na primeira vez.
+
+**Linux** — o `tkinter` não vem pelo pip, é pacote da distro. O `tarjador.sh`
+detecta e diz o comando certo para a sua:
 
 ```bash
-python -m pip install -r requirements.txt
+sudo apt install python3-tk     # Debian/Ubuntu (dnf, pacman, zypper e apk também são reconhecidos)
+chmod +x tarjador.sh
+./tarjador.sh
 ```
+
+Nas distros que marcam o Python como *externally managed* (PEP 668), o pip do
+sistema recusa instalar. O script percebe isso e cria um `.venv` local
+automaticamente, com `--system-site-packages` para enxergar o `tkinter` da
+distro. Não precisa fazer nada — e da segunda vez em diante ele já usa o `.venv`
+direto.
+
+**macOS** — `./tarjador.sh` também funciona; se faltar o tkinter, ele sugere
+`brew install python-tk`.
+
+Instalação manual, em qualquer sistema:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 tarjador.py
+```
+
+### Notas de portabilidade
+
+Três coisas que o código trata explicitamente por causa das diferenças entre
+sistemas — anotadas aqui para quem for mexer:
+
+| Diferença | Tratamento |
+|---|---|
+| Roda do mouse | Windows e macOS mandam `<MouseWheel>`; o X11 do Linux manda `Button-4`/`Button-5`. Sem a tradução, rolagem e `Ctrl`+zoom não responderiam no Linux. |
+| Fonte da interface | "Segoe UI" só existe no Windows. Usa a fonte padrão do sistema, resolvida em tempo de execução. |
+| Largura dos textos | A opção "Rasterizar" fica na barra lateral, não na barra de cima: a fonte do Linux é mais larga e o texto era cortado quando disputava espaço com os botões. |
+| Abrir a pasta `output/` | `os.startfile` no Windows, `open` no macOS, `xdg-open` no Linux. |
+
+⚠️ **O `tarjador.sh` precisa estar com terminações de linha LF.** Se o arquivo
+passar por algum lugar que converta para CRLF (um zip no Windows, um editor
+mal configurado), o Linux reclama de `bad interpreter` e o script nem roda.
+Conserta com `sed -i 's/\r$//' tarjador.sh` ou `dos2unix tarjador.sh`.
+
+## Testes
+
+```bash
+python3 testes/rodar_testes.py          # roda tudo
+python3 testes/rodar_testes.py --lista  # lista os casos
+```
+
+Num Linux sem tela (servidor, container), a interface precisa de um display
+falso: `xvfb-run -a python3 testes/rodar_testes.py`.
+
+Os testes são auto-contidos — geram os próprios PDFs em pasta temporária e não
+encostam no seu `input/`/`output/`. Os CPFs usados são fictícios.
+
+| Caso | O que prova |
+|---|---|
+| `texto` | CPF em texto some do arquivo; o resto do texto fica |
+| `blindagem_normal` / `_raster` | Os 5 esconderijos de uma vez: texto, metadado, campo de formulário, anotação e imagem |
+| `foto_normal` | **O principal:** varre todos os objetos do PDF salvo atrás de sobras da foto original, e confere que não rasterizou à toa |
+| `foto_raster` | O mesmo, com a rasterização ligada |
+| `foto_rot90/180/270` | O mapeamento dentro da imagem aguenta rotação |
+| `salvar` | Não sobrescreve arquivo existente |
+| `interface` | Roda do mouse (inclusive `Button-4/5` do X11), fonte, coordenadas, desenhar/apagar/desfazer |
+
+O truque do teste de foto: o CPF é desenhado sobre uma faixa **magenta puro**.
+Depois de salvar, qualquer pixel magenta que apareça em qualquer objeto do
+arquivo denuncia uma cópia sobrevivente da imagem original.
+
+**Onde eles rodaram:**
+
+| Ambiente | Resultado |
+|---|---|
+| Windows 11, Python 3.12 | 10/10 |
+| Ubuntu 26.04 (WSL2), Python 3.14, X11 via Xvfb | 10/10 |
+
+No Linux foi validado o caminho completo, não só a lógica de tarja: o
+`tarjador.sh` detectando a falta do `tkinter` e saindo com código 1, o fallback
+do PEP 668 criando o `.venv` sozinho, a interface subindo sob X11, e os eventos
+`Button-4/5` disparados de verdade com `event_generate` (rolagem, `Ctrl`+zoom e
+arrasto do mouse desenhando a tarja).

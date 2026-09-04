@@ -1,0 +1,10 @@
+# Documentos com dados pessoais NUNCA vao para o repositorio.
+# Sem isto, um "git add ." mandaria os CPFs para o GitHub.
+input/
+output/
+
+# Ambiente e cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
